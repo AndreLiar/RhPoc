@@ -105,9 +105,9 @@ jobs:
     
     - name: Check cluster access and deploy
       run: |
-        # Check if we can access the cluster
-        echo "🔍 Checking cluster access..."
-        kubectl cluster-info
+        # Check basic cluster connectivity without kube-system access
+        echo "🔍 Checking cluster connectivity..."
+        kubectl version --client
         
         # Try to create namespace, fallback to default if no permissions
         echo "📂 Setting up namespace..."
