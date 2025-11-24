@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hr-frontend
+  namespace: hr-assistant
+  labels:
+    app: hr-frontend
+    component: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hr-frontend
+  template:
+    metadata:
+      labels:
+        app: hr-frontend
+        component: frontend
+    spec:
+      containers:
+      - name: frontend
+        image: acrgapdev93786.azurecr.io/hr-frontend:latest
+        ports:
+        - containerPort: 8501
+          name: http
+        env:
+        - name: BACKEND_URL
+          value: "http://hr-backend-service:8000/api/v1/hr/query"
+        - name: BACKEND_UPLOAD_URL
+          value: "http://hr-backend-service:8000/api/v1/hr/upload"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /_stcore/health
+            port: 8501
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /_stcore/health
+            port: 8501
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hr-frontend-service
+  namespace: hr-assistant
+  labels:
+    app: hr-frontend
+spec:
+  selector:
+    app: hr-frontend
+  ports:
+  - protocol: TCP
+    port: 8501
+    targetPort: 8501
+    name: http
+  type: ClusterIP

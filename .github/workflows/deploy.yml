@@ -1,0 +1,161 @@
+name: Deploy HR Assistant to OpsTurn360 Platform
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  # OpsTurn360 Platform Configuration (update with your actual values)
+  ACR_NAME: acrgapdev93786  # Your actual ACR name
+  CLUSTER_RESOURCE_GROUP: rg-gap-dev
+  CLUSTER_NAME: aks-gap-dev
+  
+  # Application Configuration
+  BACKEND_IMAGE_NAME: hr-backend
+  FRONTEND_IMAGE_NAME: hr-frontend
+  NAMESPACE: hr-assistant
+
+jobs:
+  # Build and push both backend and frontend containers
+  build:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.pull_request.merged == true
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    
+    - name: Login to Azure Container Registry
+      run: az acr login --name ${{ env.ACR_NAME }}
+    
+    # Build and Push Backend
+    - name: Build Backend Docker Image
+      working-directory: ./backend
+      run: |
+        docker build -t ${{ env.ACR_NAME }}.azurecr.io/${{ env.BACKEND_IMAGE_NAME }}:${{ github.sha }} .
+        docker build -t ${{ env.ACR_NAME }}.azurecr.io/${{ env.BACKEND_IMAGE_NAME }}:latest .
+    
+    - name: Push Backend Image
+      run: |
+        docker push ${{ env.ACR_NAME }}.azurecr.io/${{ env.BACKEND_IMAGE_NAME }}:${{ github.sha }}
+        docker push ${{ env.ACR_NAME }}.azurecr.io/${{ env.BACKEND_IMAGE_NAME }}:latest
+    
+    # Build and Push Frontend  
+    - name: Build Frontend Docker Image
+      working-directory: ./frontend/streamlit
+      run: |
+        docker build -t ${{ env.ACR_NAME }}.azurecr.io/${{ env.FRONTEND_IMAGE_NAME }}:${{ github.sha }} .
+        docker build -t ${{ env.ACR_NAME }}.azurecr.io/${{ env.FRONTEND_IMAGE_NAME }}:latest .
+    
+    - name: Push Frontend Image
+      run: |
+        docker push ${{ env.ACR_NAME }}.azurecr.io/${{ env.FRONTEND_IMAGE_NAME }}:${{ github.sha }}
+        docker push ${{ env.ACR_NAME }}.azurecr.io/${{ env.FRONTEND_IMAGE_NAME }}:latest
+
+  # Deploy to OpsTurn360 AKS Cluster
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    
+    - name: Get AKS Credentials
+      run: |
+        az aks get-credentials --resource-group ${{ env.CLUSTER_RESOURCE_GROUP }} --name ${{ env.CLUSTER_NAME }}
+    
+    - name: Update Kubernetes Manifests with New Images
+      run: |
+        # Update backend deployment with new image tag
+        sed -i "s|image: ${{ env.ACR_NAME }}.azurecr.io/${{ env.BACKEND_IMAGE_NAME }}:.*|image: ${{ env.ACR_NAME }}.azurecr.io/${{ env.BACKEND_IMAGE_NAME }}:${{ github.sha }}|g" k8s/backend-deployment.yaml
+        
+        # Update frontend deployment with new image tag
+        sed -i "s|image: ${{ env.ACR_NAME }}.azurecr.io/${{ env.FRONTEND_IMAGE_NAME }}:.*|image: ${{ env.ACR_NAME }}.azurecr.io/${{ env.FRONTEND_IMAGE_NAME }}:${{ github.sha }}|g" k8s/frontend-deployment.yaml
+        
+        # Show what we're about to deploy
+        echo "Backend deployment manifest:"
+        grep "image:" k8s/backend-deployment.yaml
+        echo "Frontend deployment manifest:"
+        grep "image:" k8s/frontend-deployment.yaml
+    
+    - name: Deploy to Kubernetes
+      run: |
+        # Create namespace if it doesn't exist
+        kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+        
+        # Create secrets securely from GitHub Secrets (not from files!)
+        echo "🔑 Creating Azure AI service secrets from GitHub environment..."
+        
+        # Create Azure services secret
+        kubectl create secret generic hr-azure-secrets \
+          --namespace=${{ env.NAMESPACE }} \
+          --from-literal=AZURE_SEARCH_ENDPOINT="${{ secrets.AZURE_SEARCH_ENDPOINT }}" \
+          --from-literal=AZURE_SEARCH_API_KEY="${{ secrets.AZURE_SEARCH_API_KEY }}" \
+          --from-literal=AZURE_SEARCH_INDEX_NAME="hr-documents" \
+          --from-literal=AZURE_BLOB_CONNECTION_STRING="${{ secrets.AZURE_BLOB_CONNECTION_STRING }}" \
+          --from-literal=AZURE_STORAGE_CONTAINER="hr-documents" \
+          --from-literal=AZURE_FORMRECOG_ENDPOINT="${{ secrets.AZURE_FORMRECOG_ENDPOINT }}" \
+          --from-literal=AZURE_FORMRECOG_API_KEY="${{ secrets.AZURE_FORMRECOG_API_KEY }}" \
+          --from-literal=AZURE_OPENAI_ENDPOINT="${{ secrets.AZURE_OPENAI_ENDPOINT }}" \
+          --from-literal=AZURE_OPENAI_API_KEY="${{ secrets.AZURE_OPENAI_API_KEY }}" \
+          --from-literal=AZURE_OPENAI_CHAT_DEPLOYMENT="text-embedding-ada-002" \
+          --from-literal=AZURE_OPENAI_EMBEDDING_DEPLOYMENT="text-embedding-ada-002" \
+          --from-literal=AZURE_OPENAI_API_VERSION="2024-02-15-preview" \
+          --dry-run=client -o yaml | kubectl apply -f -
+        
+        # Create OpenAI secret
+        kubectl create secret generic hr-openai-secrets \
+          --namespace=${{ env.NAMESPACE }} \
+          --from-literal=OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
+          --from-literal=OPENAI_CHAT_MODEL="gpt-4o-mini" \
+          --from-literal=OPENAI_EMBEDDING_MODEL="text-embedding-ada-002" \
+          --dry-run=client -o yaml | kubectl apply -f -
+        
+        # Deploy application manifests
+        kubectl apply -f k8s/backend-deployment.yaml
+        kubectl apply -f k8s/frontend-deployment.yaml
+        kubectl apply -f k8s/ingress.yaml
+        
+        # Wait for deployments to be ready
+        echo "Waiting for backend deployment..."
+        kubectl rollout status deployment/hr-backend -n ${{ env.NAMESPACE }} --timeout=300s
+        
+        echo "Waiting for frontend deployment..."
+        kubectl rollout status deployment/hr-frontend -n ${{ env.NAMESPACE }} --timeout=300s
+    
+    - name: Verify Deployment
+      run: |
+        echo "=== Deployment Status ==="
+        kubectl get deployments -n ${{ env.NAMESPACE }}
+        kubectl get services -n ${{ env.NAMESPACE }}
+        kubectl get ingress -n ${{ env.NAMESPACE }}
+        
+        echo "=== Pod Status ==="
+        kubectl get pods -n ${{ env.NAMESPACE }}
+        
+        echo "=== Recent Events ==="
+        kubectl get events -n ${{ env.NAMESPACE }} --sort-by=.metadata.creationTimestamp
+    
+    - name: Get Application URLs
+      run: |
+        echo "=== Application Access ==="
+        echo "🌐 Frontend (Streamlit): https://hr.gap-platform.dev"
+        echo "🔌 Backend API: https://hr-api.gap-platform.dev"
+        echo "📊 Health Check: https://hr-api.gap-platform.dev/health"
+        echo ""
+        echo "⚠️  Configure DNS to point these domains to your load balancer IP:"
+        kubectl get service traefik -n traefik-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}'

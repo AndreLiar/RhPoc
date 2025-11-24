@@ -156,8 +156,6 @@ models/
 # Claude Code configuration
 CLAUDE.md
 
-# Documentation with sensitive data
-docs/README.md
-docs/setup-instructions.md
-docs/environment-configuration.md
-docs/azure-setup-commands.md
+# Documentation with sensitive data (exclude all .md except README.md)
+*.md
+!README.md

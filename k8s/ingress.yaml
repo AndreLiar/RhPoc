@@ -1,0 +1,40 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hr-assistant-ingress
+  namespace: hr-assistant
+  annotations:
+    kubernetes.io/ingress.class: traefik
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+  labels:
+    app: hr-assistant
+spec:
+  rules:
+  # Frontend (Streamlit UI)  
+  - host: hr.gap-platform.dev
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: hr-frontend-service
+            port:
+              number: 8501
+  # Backend API
+  - host: hr-api.gap-platform.dev
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: hr-backend-service
+            port:
+              number: 8000
+  tls:
+  - hosts:
+    - hr.gap-platform.dev
+    - hr-api.gap-platform.dev
+    secretName: hr-assistant-tls
