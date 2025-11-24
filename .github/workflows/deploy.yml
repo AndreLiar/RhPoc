@@ -169,10 +169,22 @@ jobs:
         
         # Wait for deployments to be ready
         echo "Waiting for backend deployment..."
-        kubectl rollout status deployment/hr-backend -n $DEPLOY_NAMESPACE --timeout=300s
+        if ! kubectl rollout status deployment/hr-backend -n $DEPLOY_NAMESPACE --timeout=600s; then
+          echo "❌ Backend deployment failed. Debugging info:"
+          kubectl get pods -n $DEPLOY_NAMESPACE -l app=hr-backend
+          kubectl describe pods -n $DEPLOY_NAMESPACE -l app=hr-backend
+          kubectl logs -n $DEPLOY_NAMESPACE -l app=hr-backend --tail=100
+          exit 1
+        fi
         
         echo "Waiting for frontend deployment..."
-        kubectl rollout status deployment/hr-frontend -n $DEPLOY_NAMESPACE --timeout=300s
+        if ! kubectl rollout status deployment/hr-frontend -n $DEPLOY_NAMESPACE --timeout=600s; then
+          echo "❌ Frontend deployment failed. Debugging info:"
+          kubectl get pods -n $DEPLOY_NAMESPACE -l app=hr-frontend
+          kubectl describe pods -n $DEPLOY_NAMESPACE -l app=hr-frontend
+          kubectl logs -n $DEPLOY_NAMESPACE -l app=hr-frontend --tail=100
+          exit 1
+        fi
     
     - name: Verify Deployment
       run: |
