@@ -74,9 +74,20 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
     
+    - name: Install kubelogin
+      run: |
+        # Install kubelogin for Azure AD authentication
+        curl -LO https://github.com/Azure/kubelogin/releases/latest/download/kubelogin-linux-amd64.zip
+        unzip kubelogin-linux-amd64.zip
+        sudo mv bin/linux_amd64/kubelogin /usr/local/bin/
+        rm -rf kubelogin-linux-amd64.zip bin/
+    
     - name: Get AKS Credentials
       run: |
         az aks get-credentials --resource-group ${{ env.CLUSTER_RESOURCE_GROUP }} --name ${{ env.CLUSTER_NAME }}
+        
+        # Convert kubeconfig to use kubelogin
+        kubelogin convert-kubeconfig -l azurecli
     
     - name: Update Kubernetes Manifests with New Images
       run: |
