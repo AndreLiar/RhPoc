@@ -103,17 +103,37 @@ jobs:
         echo "Frontend deployment manifest:"
         grep "image:" k8s/frontend-deployment.yaml
     
-    - name: Deploy to Kubernetes
+    - name: Check cluster access and deploy
       run: |
-        # Create namespace if it doesn't exist
-        kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+        # Check if we can access the cluster
+        echo "🔍 Checking cluster access..."
+        kubectl cluster-info
+        
+        # Try to create namespace, fallback to default if no permissions
+        echo "📂 Setting up namespace..."
+        if kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -; then
+          echo "✅ Namespace ${{ env.NAMESPACE }} ready"
+          DEPLOY_NAMESPACE=${{ env.NAMESPACE }}
+        else
+          echo "⚠️  Cannot create namespace, checking if it exists..."
+          if kubectl get namespace ${{ env.NAMESPACE }} 2>/dev/null; then
+            echo "✅ Using existing namespace ${{ env.NAMESPACE }}"
+            DEPLOY_NAMESPACE=${{ env.NAMESPACE }}
+          else
+            echo "⚠️  Using default namespace due to permissions"
+            DEPLOY_NAMESPACE="default"
+          fi
+        fi
+        
+        # Export for next steps
+        echo "DEPLOY_NAMESPACE=$DEPLOY_NAMESPACE" >> $GITHUB_ENV
         
         # Create secrets securely from GitHub Secrets (not from files!)
         echo "🔑 Creating Azure AI service secrets from GitHub environment..."
         
         # Create Azure services secret
         kubectl create secret generic hr-azure-secrets \
-          --namespace=${{ env.NAMESPACE }} \
+          --namespace=$DEPLOY_NAMESPACE \
           --from-literal=AZURE_SEARCH_ENDPOINT="${{ secrets.AZURE_SEARCH_ENDPOINT }}" \
           --from-literal=AZURE_SEARCH_API_KEY="${{ secrets.AZURE_SEARCH_API_KEY }}" \
           --from-literal=AZURE_SEARCH_INDEX_NAME="hr-documents" \
@@ -130,11 +150,17 @@ jobs:
         
         # Create OpenAI secret
         kubectl create secret generic hr-openai-secrets \
-          --namespace=${{ env.NAMESPACE }} \
+          --namespace=$DEPLOY_NAMESPACE \
           --from-literal=OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
           --from-literal=OPENAI_CHAT_MODEL="gpt-4o-mini" \
           --from-literal=OPENAI_EMBEDDING_MODEL="text-embedding-ada-002" \
           --dry-run=client -o yaml | kubectl apply -f -
+        
+        # Update manifests with correct namespace
+        echo "📝 Updating manifest namespaces to: $DEPLOY_NAMESPACE"
+        sed -i "s/namespace: hr-assistant/namespace: $DEPLOY_NAMESPACE/g" k8s/backend-deployment.yaml
+        sed -i "s/namespace: hr-assistant/namespace: $DEPLOY_NAMESPACE/g" k8s/frontend-deployment.yaml
+        sed -i "s/namespace: hr-assistant/namespace: $DEPLOY_NAMESPACE/g" k8s/ingress.yaml
         
         # Deploy application manifests
         kubectl apply -f k8s/backend-deployment.yaml
@@ -143,23 +169,29 @@ jobs:
         
         # Wait for deployments to be ready
         echo "Waiting for backend deployment..."
-        kubectl rollout status deployment/hr-backend -n ${{ env.NAMESPACE }} --timeout=300s
+        kubectl rollout status deployment/hr-backend -n $DEPLOY_NAMESPACE --timeout=300s
         
         echo "Waiting for frontend deployment..."
-        kubectl rollout status deployment/hr-frontend -n ${{ env.NAMESPACE }} --timeout=300s
+        kubectl rollout status deployment/hr-frontend -n $DEPLOY_NAMESPACE --timeout=300s
     
     - name: Verify Deployment
       run: |
-        echo "=== Deployment Status ==="
-        kubectl get deployments -n ${{ env.NAMESPACE }}
-        kubectl get services -n ${{ env.NAMESPACE }}
-        kubectl get ingress -n ${{ env.NAMESPACE }}
+        # Use environment variable from previous step
+        DEPLOY_NAMESPACE="${{ env.DEPLOY_NAMESPACE }}"
+        if [ -z "$DEPLOY_NAMESPACE" ]; then
+          DEPLOY_NAMESPACE="${{ env.NAMESPACE }}"
+        fi
+        
+        echo "=== Deployment Status (namespace: $DEPLOY_NAMESPACE) ==="
+        kubectl get deployments -n $DEPLOY_NAMESPACE
+        kubectl get services -n $DEPLOY_NAMESPACE
+        kubectl get ingress -n $DEPLOY_NAMESPACE
         
         echo "=== Pod Status ==="
-        kubectl get pods -n ${{ env.NAMESPACE }}
+        kubectl get pods -n $DEPLOY_NAMESPACE
         
         echo "=== Recent Events ==="
-        kubectl get events -n ${{ env.NAMESPACE }} --sort-by=.metadata.creationTimestamp
+        kubectl get events -n $DEPLOY_NAMESPACE --sort-by=.metadata.creationTimestamp
     
     - name: Get Application URLs
       run: |
