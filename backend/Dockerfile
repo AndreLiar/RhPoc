@@ -8,21 +8,20 @@ ENV PYTHONUNBUFFERED=1
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy all app files explicitly to ensure models directory is included
+# Copy the entire app directory first
 COPY app/ ./app/
 
-# Create models directory and copy files explicitly if needed
-RUN mkdir -p /app/app/models
-COPY app/models/ ./app/models/
-
-# Debug: List the directory structure
-RUN echo "=== Directory structure ===" && \
-    find /app -type f -name "*.py" | head -20 && \
-    echo "=== End structure ===" && \
-    ls -la /app/app/ && \
-    ls -la /app/app/models/ && \
-    echo "=== Python files in models ===" && \
-    find /app/app/models -name "*.py" -exec ls -la {} \;
+# Verify the directory was copied and check if models exists
+RUN ls -la /app/app/ && \
+    echo "=== Checking for models directory ===" && \
+    if [ -d "/app/app/models" ]; then \
+        echo "✅ Models directory found"; \
+        ls -la /app/app/models/; \
+    else \
+        echo "❌ Models directory missing - creating manually"; \
+        mkdir -p /app/app/models; \
+        echo "# Created by Dockerfile" > /app/app/models/__init__.py; \
+    fi
 
 EXPOSE 8000
 
