@@ -5,8 +5,7 @@ metadata:
   namespace: hr-assistant
   annotations:
     kubernetes.io/ingress.class: traefik
-    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
-    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.entrypoints: web
   labels:
     app: hr-assistant
 spec:
@@ -33,8 +32,9 @@ spec:
             name: hr-backend-service
             port:
               number: 8000
-  tls:
-  - hosts:
-    - hr.gap-platform.dev
-    - hr-api.gap-platform.dev
-    secretName: hr-assistant-tls
+# TLS disabled for easier local development
+  # tls:
+  # - hosts:
+  #   - hr.gap-platform.dev
+  #   - hr-api.gap-platform.dev
+  #   secretName: hr-assistant-tls
