@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: acrgapdev93786.azurecr.io/hr-frontend:b31d8692664bc5f0203c88d7105afcdfae124459
+        image: acrgapdev93786.azurecr.io/hr-frontend:326d85d3b1aa36c9ea3bac73ff419af1a8146617
         ports:
         - containerPort: 8501
           name: http
