@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: backend
-        image: acrgapdev93786.azurecr.io/hr-backend:326d85d3b1aa36c9ea3bac73ff419af1a8146617
+        image: acrgapdev93786.azurecr.io/hr-backend:62cb26776b61af0a32424dd8503eee6a74b1fda2
         ports:
         - containerPort: 8000
           name: http
