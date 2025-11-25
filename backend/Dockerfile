@@ -39,9 +39,12 @@ RUN mkdir -p /app/app/models && \
     echo '    debug_info: Optional[dict] = None' >> /app/app/models/schemas.py
 
 # Verify the models directory and files exist
-RUN ls -la /app/app/ && \
+RUN echo "=== Verifying models creation ===" && \
+    ls -la /app/app/ && \
     echo "=== Models directory contents ===" && \
     ls -la /app/app/models/ && \
+    echo "=== Testing Python import ===" && \
+    python3 -c "import sys; sys.path.append('/app'); from app.models.schemas import HRQueryRequest; print('✅ Import successful')" && \
     echo "=== schemas.py content ===" && \
     cat /app/app/models/schemas.py
 
