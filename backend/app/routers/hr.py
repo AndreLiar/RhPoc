@@ -49,7 +49,7 @@ async def query_hr_assistant(payload: HRQueryRequest):
 
 @router.post("/upload")
 async def upload_hr_document(file: UploadFile = File(...)):
-    """Upload a single HR PDF, ingest into Azure Search."""
+    """Upload a single HR PDF, ingest into Azure Search. GitOps test."""
 
     if file.content_type not in ("application/pdf", "application/octet-stream"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")

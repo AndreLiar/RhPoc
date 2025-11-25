@@ -59,8 +59,8 @@ jobs:
         docker push ${{ env.ACR_NAME }}.azurecr.io/${{ env.FRONTEND_IMAGE_NAME }}:${{ github.sha }}
         docker push ${{ env.ACR_NAME }}.azurecr.io/${{ env.FRONTEND_IMAGE_NAME }}:latest
 
-  # Deploy to OpsTurn360 AKS Cluster
-  deploy:
+  # Update manifests and commit to Git for GitOps
+  update-manifests:
     needs: build
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
@@ -68,149 +68,46 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
-    - name: Azure Login
-      uses: azure/login@v1
       with:
-        creds: ${{ secrets.AZURE_CREDENTIALS }}
-    
-    - name: Install kubelogin
-      run: |
-        # Install kubelogin for Azure AD authentication
-        curl -LO https://github.com/Azure/kubelogin/releases/latest/download/kubelogin-linux-amd64.zip
-        unzip kubelogin-linux-amd64.zip
-        sudo mv bin/linux_amd64/kubelogin /usr/local/bin/
-        rm -rf kubelogin-linux-amd64.zip bin/
-    
-    - name: Get AKS Credentials
-      run: |
-        az aks get-credentials --resource-group ${{ env.CLUSTER_RESOURCE_GROUP }} --name ${{ env.CLUSTER_NAME }}
-        
-        # Convert kubeconfig to use kubelogin
-        kubelogin convert-kubeconfig -l azurecli
+        token: ${{ secrets.GITHUB_TOKEN }}
     
     - name: Update Kubernetes Manifests with New Images
       run: |
         # Update backend deployment with new image tag
         sed -i "s|image: ${{ env.ACR_NAME }}.azurecr.io/${{ env.BACKEND_IMAGE_NAME }}:.*|image: ${{ env.ACR_NAME }}.azurecr.io/${{ env.BACKEND_IMAGE_NAME }}:${{ github.sha }}|g" k8s/backend-deployment.yaml
         
-        # Update frontend deployment with new image tag
+        # Update frontend deployment with new image tag  
         sed -i "s|image: ${{ env.ACR_NAME }}.azurecr.io/${{ env.FRONTEND_IMAGE_NAME }}:.*|image: ${{ env.ACR_NAME }}.azurecr.io/${{ env.FRONTEND_IMAGE_NAME }}:${{ github.sha }}|g" k8s/frontend-deployment.yaml
         
-        # Show what we're about to deploy
-        echo "Backend deployment manifest:"
+        # Show what we're updating
+        echo "=== Updated Images ==="
+        echo "Backend image:"
         grep "image:" k8s/backend-deployment.yaml
-        echo "Frontend deployment manifest:"
+        echo "Frontend image:"
         grep "image:" k8s/frontend-deployment.yaml
     
-    - name: Check cluster access and deploy
+    - name: Commit and Push Updated Manifests
       run: |
-        # Check basic cluster connectivity without kube-system access
-        echo "🔍 Checking cluster connectivity..."
-        kubectl version --client
+        # Configure git
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
         
-        # Try to create namespace, fallback to default if no permissions
-        echo "📂 Setting up namespace..."
-        if kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -; then
-          echo "✅ Namespace ${{ env.NAMESPACE }} ready"
-          DEPLOY_NAMESPACE=${{ env.NAMESPACE }}
-        else
-          echo "⚠️  Cannot create namespace, checking if it exists..."
-          if kubectl get namespace ${{ env.NAMESPACE }} 2>/dev/null; then
-            echo "✅ Using existing namespace ${{ env.NAMESPACE }}"
-            DEPLOY_NAMESPACE=${{ env.NAMESPACE }}
-          else
-            echo "⚠️  Using default namespace due to permissions"
-            DEPLOY_NAMESPACE="default"
-          fi
+        # Check if there are changes
+        if git diff --quiet k8s/; then
+          echo "No changes to commit"
+          exit 0
         fi
         
-        # Export for next steps
-        echo "DEPLOY_NAMESPACE=$DEPLOY_NAMESPACE" >> $GITHUB_ENV
+        # Commit and push changes
+        git add k8s/backend-deployment.yaml k8s/frontend-deployment.yaml
+        git commit -m "🚀 Update image tags to ${{ github.sha }}
+
+        Backend: ${{ env.ACR_NAME }}.azurecr.io/${{ env.BACKEND_IMAGE_NAME }}:${{ github.sha }}
+        Frontend: ${{ env.ACR_NAME }}.azurecr.io/${{ env.FRONTEND_IMAGE_NAME }}:${{ github.sha }}
         
-        # Create secrets securely from GitHub Secrets (not from files!)
-        echo "🔑 Creating Azure AI service secrets from GitHub environment..."
+        ArgoCD will detect these changes and deploy automatically."
         
-        # Create Azure services secret
-        kubectl create secret generic hr-azure-secrets \
-          --namespace=$DEPLOY_NAMESPACE \
-          --from-literal=AZURE_SEARCH_ENDPOINT="${{ secrets.AZURE_SEARCH_ENDPOINT }}" \
-          --from-literal=AZURE_SEARCH_API_KEY="${{ secrets.AZURE_SEARCH_API_KEY }}" \
-          --from-literal=AZURE_SEARCH_INDEX_NAME="hr-documents" \
-          --from-literal=AZURE_BLOB_CONNECTION_STRING="${{ secrets.AZURE_BLOB_CONNECTION_STRING }}" \
-          --from-literal=AZURE_STORAGE_CONTAINER="hr-documents" \
-          --from-literal=AZURE_FORMRECOG_ENDPOINT="${{ secrets.AZURE_FORMRECOG_ENDPOINT }}" \
-          --from-literal=AZURE_FORMRECOG_API_KEY="${{ secrets.AZURE_FORMRECOG_API_KEY }}" \
-          --from-literal=AZURE_OPENAI_ENDPOINT="${{ secrets.AZURE_OPENAI_ENDPOINT }}" \
-          --from-literal=AZURE_OPENAI_API_KEY="${{ secrets.AZURE_OPENAI_API_KEY }}" \
-          --from-literal=AZURE_OPENAI_CHAT_DEPLOYMENT="text-embedding-ada-002" \
-          --from-literal=AZURE_OPENAI_EMBEDDING_DEPLOYMENT="text-embedding-ada-002" \
-          --from-literal=AZURE_OPENAI_API_VERSION="2024-02-15-preview" \
-          --dry-run=client -o yaml | kubectl apply -f -
+        git push
         
-        # Create OpenAI secret
-        kubectl create secret generic hr-openai-secrets \
-          --namespace=$DEPLOY_NAMESPACE \
-          --from-literal=OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
-          --from-literal=OPENAI_CHAT_MODEL="gpt-4o-mini" \
-          --from-literal=OPENAI_EMBEDDING_MODEL="text-embedding-ada-002" \
-          --dry-run=client -o yaml | kubectl apply -f -
-        
-        # Update manifests with correct namespace
-        echo "📝 Updating manifest namespaces to: $DEPLOY_NAMESPACE"
-        sed -i "s/namespace: hr-assistant/namespace: $DEPLOY_NAMESPACE/g" k8s/backend-deployment.yaml
-        sed -i "s/namespace: hr-assistant/namespace: $DEPLOY_NAMESPACE/g" k8s/frontend-deployment.yaml
-        sed -i "s/namespace: hr-assistant/namespace: $DEPLOY_NAMESPACE/g" k8s/ingress.yaml
-        
-        # Deploy application manifests
-        kubectl apply -f k8s/backend-deployment.yaml
-        kubectl apply -f k8s/frontend-deployment.yaml
-        kubectl apply -f k8s/ingress.yaml
-        
-        # Wait for deployments to be ready
-        echo "Waiting for backend deployment..."
-        if ! kubectl rollout status deployment/hr-backend -n $DEPLOY_NAMESPACE --timeout=600s; then
-          echo "❌ Backend deployment failed. Debugging info:"
-          kubectl get pods -n $DEPLOY_NAMESPACE -l app=hr-backend
-          kubectl describe pods -n $DEPLOY_NAMESPACE -l app=hr-backend
-          kubectl logs -n $DEPLOY_NAMESPACE -l app=hr-backend --tail=100
-          exit 1
-        fi
-        
-        echo "Waiting for frontend deployment..."
-        if ! kubectl rollout status deployment/hr-frontend -n $DEPLOY_NAMESPACE --timeout=600s; then
-          echo "❌ Frontend deployment failed. Debugging info:"
-          kubectl get pods -n $DEPLOY_NAMESPACE -l app=hr-frontend
-          kubectl describe pods -n $DEPLOY_NAMESPACE -l app=hr-frontend
-          kubectl logs -n $DEPLOY_NAMESPACE -l app=hr-frontend --tail=100
-          exit 1
-        fi
-    
-    - name: Verify Deployment
-      run: |
-        # Use environment variable from previous step
-        DEPLOY_NAMESPACE="${{ env.DEPLOY_NAMESPACE }}"
-        if [ -z "$DEPLOY_NAMESPACE" ]; then
-          DEPLOY_NAMESPACE="${{ env.NAMESPACE }}"
-        fi
-        
-        echo "=== Deployment Status (namespace: $DEPLOY_NAMESPACE) ==="
-        kubectl get deployments -n $DEPLOY_NAMESPACE
-        kubectl get services -n $DEPLOY_NAMESPACE
-        kubectl get ingress -n $DEPLOY_NAMESPACE
-        
-        echo "=== Pod Status ==="
-        kubectl get pods -n $DEPLOY_NAMESPACE
-        
-        echo "=== Recent Events ==="
-        kubectl get events -n $DEPLOY_NAMESPACE --sort-by=.metadata.creationTimestamp
-    
-    - name: Get Application URLs
-      run: |
-        echo "=== Application Access ==="
-        echo "🌐 Frontend (Streamlit): https://hr.gap-platform.dev"
-        echo "🔌 Backend API: https://hr-api.gap-platform.dev"
-        echo "📊 Health Check: https://hr-api.gap-platform.dev/health"
-        echo ""
-        echo "⚠️  Configure DNS to point these domains to your load balancer IP:"
-        kubectl get service traefik -n traefik-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+        echo "✅ Manifests updated and pushed to Git"
+        echo "🔄 ArgoCD will now detect changes and deploy automatically"
