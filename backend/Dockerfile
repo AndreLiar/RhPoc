@@ -14,31 +14,29 @@ COPY app/ ./app/
 # Create models directory and schemas.py manually to ensure it exists
 RUN mkdir -p /app/app/models && \
     echo '# Models package' > /app/app/models/__init__.py && \
-    cat > /app/app/models/schemas.py << 'EOF'
-from typing import List, Optional
-from pydantic import BaseModel
-
-
-class HRQueryRequest(BaseModel):
-    question: str
-    topic: Optional[str] = None  # optional manual override
-    debug: bool = False
-
-
-class Citation(BaseModel):
-    source: str
-    page: Optional[int] = None
-    snippet: Optional[str] = None
-
-
-class HRQueryResponse(BaseModel):
-    answer: str
-    citations: List[Citation] = []
-    topic: Optional[str] = None
-    intent: Optional[str] = None
-    raw_context_count: int = 0
-    debug_info: Optional[dict] = None
-EOF
+    echo 'from typing import List, Optional' > /app/app/models/schemas.py && \
+    echo 'from pydantic import BaseModel' >> /app/app/models/schemas.py && \
+    echo '' >> /app/app/models/schemas.py && \
+    echo '' >> /app/app/models/schemas.py && \
+    echo 'class HRQueryRequest(BaseModel):' >> /app/app/models/schemas.py && \
+    echo '    question: str' >> /app/app/models/schemas.py && \
+    echo '    topic: Optional[str] = None  # optional manual override' >> /app/app/models/schemas.py && \
+    echo '    debug: bool = False' >> /app/app/models/schemas.py && \
+    echo '' >> /app/app/models/schemas.py && \
+    echo '' >> /app/app/models/schemas.py && \
+    echo 'class Citation(BaseModel):' >> /app/app/models/schemas.py && \
+    echo '    source: str' >> /app/app/models/schemas.py && \
+    echo '    page: Optional[int] = None' >> /app/app/models/schemas.py && \
+    echo '    snippet: Optional[str] = None' >> /app/app/models/schemas.py && \
+    echo '' >> /app/app/models/schemas.py && \
+    echo '' >> /app/app/models/schemas.py && \
+    echo 'class HRQueryResponse(BaseModel):' >> /app/app/models/schemas.py && \
+    echo '    answer: str' >> /app/app/models/schemas.py && \
+    echo '    citations: List[Citation] = []' >> /app/app/models/schemas.py && \
+    echo '    topic: Optional[str] = None' >> /app/app/models/schemas.py && \
+    echo '    intent: Optional[str] = None' >> /app/app/models/schemas.py && \
+    echo '    raw_context_count: int = 0' >> /app/app/models/schemas.py && \
+    echo '    debug_info: Optional[dict] = None' >> /app/app/models/schemas.py
 
 # Verify the models directory and files exist
 RUN ls -la /app/app/ && \
